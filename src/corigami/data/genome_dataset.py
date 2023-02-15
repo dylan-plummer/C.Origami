@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from torch.utils.data import Dataset
 from corigami.data.chromosome_dataset import ChromosomeDataset
@@ -40,7 +41,8 @@ class GenomeDataset(Dataset):
         self.genomic_features = self.load_features(f'{celltype_root}/genomic_features', feat_dicts)
 
         # Load regions to be ignored
-        self.centrotelo_dict = self.proc_centrotelo(f'{celltype_root}/../centrotelo.bed')
+        root_data_dir = os.path.dirname(celltype_root)
+        self.centrotelo_dict = self.proc_centrotelo(f'{root_data_dir}/centrotelo.bed')
         # Load chromsome_datasets as part of the dictionary
         self.chr_data, self.lengths = self.load_chrs(self.chr_names, self.genomic_features)
         # Build chrmosome lookup table from the genome
