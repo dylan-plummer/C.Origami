@@ -1,16 +1,61 @@
+import os
 import sys
+import wandb
 import torch
 import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import pytorch_lightning.callbacks as callbacks
+from pytorch_lightning.callbacks.base import Callback
+from pytorch_lightning.loggers import WandbLogger
 
 import corigami.model.corigami_models as corigami_models
 from corigami.data import genome_dataset
+import corigami.inference.utils.inference_utils as infer
+from corigami.inference.utils import plot_utils 
+
+
+class VizCallback(Callback):
+    def __init__(self, out_dir='training_viz'):
+        self.out_dir = out_dir
+        os.makedirs(self.out_dir, exist_ok=True)
+        self.chr_names = ['chr2', 'chr10', 'chr15']
+        self.celltypes = ['imr90', 'imr90', 'imr90']
+        self.starts = [500000, 122700000, 59100000]
+        self.seq = "corigami_data/data/hg38/dna_sequence"
+        self.ctcf = "corigami_data/data/hg38/imr90/genomic_features/ctcf_log2fc.bw"
+        self.atac = "corigami_data/data/hg38/imr90/genomic_features/atac.bw"
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        print("Evaluating is starting")
+        for chr_name, celltype, start in zip(self.chr_names, self.celltypes, self.starts):
+            locus = f"{celltype}-{chr_name}:{start}"
+            seq_region, ctcf_region, atac_region = infer.load_region(chr_name, 
+                start, self.seq, self.ctcf, self.atac)
+            inputs = infer.preprocess_default(seq_region, ctcf_region, atac_region)
+            pl_module.model.eval()
+            pred = pl_module.model(inputs)[0].detach().cpu().numpy()
+            os.makedirs(os.path.join(self.out_dir, locus), exist_ok=True)
+            plot = plot_utils.MatrixPlot(os.path.join(self.out_dir, locus), pred, 'prediction', celltype, 
+                                 chr_name, start)
+            plot.plot()
+            tmp_plot_path = os.path.join(self.out_dir, locus, celltype, 'prediction', 'imgs', f"{chr_name}_{start}.png")
+            new_plot_path = os.path.join(self.out_dir, locus, celltype, f"{pl_module.current_epoch}.png")
+            try:
+                os.rename(tmp_plot_path, new_plot_path)
+                wandb.log({locus: wandb.Image(new_plot_path)})
+            except Exception as e:
+                print(e)
+
 
 def main():
     args = init_parser()
     init_training(args)
+    wandb.init(project='', entity='dylan-plummer',
+               config=args.__dict__)
+    #wandb.watch(model, log_freq=2000)
+    config = wandb.config
 
 def init_parser():
   parser = argparse.ArgumentParser(description='C.Origami Training Module.')
@@ -80,17 +125,19 @@ def init_training(args):
     lr_monitor = callbacks.LearningRateMonitor(logging_interval='epoch')
 
     # Logger
-    csv_logger = pl.loggers.CSVLogger(save_dir = f'{args.run_save_path}/csv')
-    all_loggers = csv_logger
+    #csv_logger = pl.loggers.CSVLogger(save_dir = f'{args.run_save_path}/csv')
+    #all_loggers = csv_logger
     
     # Assign seed
     pl.seed_everything(args.run_seed, workers=True)
     pl_module = TrainModule(args)
+    wandb_logger = WandbLogger(project='c.origami')
     pl_trainer = pl.Trainer(strategy='ddp',
                             accelerator="gpu", devices=args.trainer_num_gpu,
                             gradient_clip_val=1,
-                            logger = all_loggers,
-                            callbacks = [early_stop_callback,
+                            logger = wandb_logger,
+                            callbacks = [VizCallback(),
+                                         early_stop_callback,
                                          checkpoint_callback,
                                          lr_monitor],
                             max_epochs = args.trainer_max_epochs
