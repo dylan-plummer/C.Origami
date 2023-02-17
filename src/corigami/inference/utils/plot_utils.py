@@ -4,12 +4,17 @@ import pandas as pd
 
 class MatrixPlot:
 
-    def __init__(self, output_path, image, prefix, celltype, chr_name, start_pos):
+    def __init__(self, output_path, image, prefix, celltype, chr_name, start_pos, ground_truth=True):
         self.output_path = output_path,
         self.prefix = prefix
         self.celltype = celltype
         self.chr_name = chr_name
         self.start_pos = start_pos
+        if ground_truth:
+            self.hic = data_feature.HiCFeature(path = f'corigami_data/data/hic_matrix/{chr_name}.npz')
+            self.mat = self.hic.get(start)
+            self.mat = resize(mat, (self.image_scale, self.image_scale), anti_aliasing=True)
+            self.mat = np.log(mat + 1)
 
         self.create_save_path(output_path, celltype, prefix)
         self.image = self.preprocess_image(image)
